@@ -355,6 +355,7 @@ def quat_mobilenet_v2(
     weights: Optional[Union[MobileNet_V2_QuantizedWeights, MobileNet_V2_Weights]] = None,
     progress: bool = True,
     quantize: bool = False,
+    cifar10: bool = False,
     **kwargs: Any,
 ) -> QuantizableMobileNetV2:
     """
@@ -391,14 +392,30 @@ def quat_mobilenet_v2(
             _ovewrite_named_param(kwargs, "backend", weights.meta["backend"])
     backend = kwargs.pop("backend", "qnnpack")
 
+    if cifar10:
+        inverted_residual_setting = [
+                # t, c, n, s
+                [1, 16, 1, 1],
+                # [6, 24, 2, 1],  # NOTE: change stride 2 -> 1 for CIFAR10
+                [4, 32, 3, 2],
+                [4, 64, 4, 2],
+                # [6, 96, 3, 1],
+                [4, 128, 3, 2],
+                # [6, 320, 1, 1],
+            ]
+        kwargs["num_classes"]=10
+        kwargs['inverted_residual_setting']=inverted_residual_setting
+
     model = QuantizableMobileNetV2(block=QuantizableInvertedResidual, **kwargs)
+    
     _replace_relu(model)
     if quantize:
         quantize_model(model, backend)
 
     if weights is not None:
         model.load_state_dict(weights.get_state_dict(progress=progress))
-
+        
+    
     return model
 
 def _replace_relu(module: nn.Module) -> None:
