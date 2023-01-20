@@ -1,10 +1,10 @@
 from functools import partial
-from typing import Any, Callable, List, Optional, Dict, TypeVar, Mapping
+from typing import Any, Callable, List, Optional, Dict, TypeVar, Mapping, Tuple
 
 import torch
 from torch import nn, Tensor
 
-from torchvision.ops.misc import Conv2dNormActivation
+from .layers import Conv2dNormActivation
 from torchvision.transforms._presets import ImageClassification
 from torchvision.utils import _log_api_usage_once
 from torchvision.models._api import Weights, WeightsEnum
@@ -12,9 +12,9 @@ from torchvision.models._meta import _IMAGENET_CATEGORIES
 from torchvision.models._utils import _make_divisible, _ovewrite_named_param, handle_legacy_interface
 from torchvision._utils import StrEnum
 from typing import Any, List, Optional, Union
+import warnings
 
 __all__ = ["MobileNetV2", "MobileNet_V2_Weights", "mobilenet_v2","QuantizableMobileNetV2","quat_mobilenet_v2"]
-
 
 # necessary for backwards compatibility
 class InvertedResidual(nn.Module):
@@ -231,7 +231,10 @@ class MobileNet_V2_Weights(WeightsEnum):
 
 @handle_legacy_interface(weights=("pretrained", MobileNet_V2_Weights.IMAGENET1K_V1))
 def mobilenet_v2(
-    *, weights: Optional[MobileNet_V2_Weights] = None, progress: bool = True, **kwargs: Any
+    *, weights: Optional[MobileNet_V2_Weights] = None,
+    progress: bool = True,
+    cifar10:bool = False,
+    **kwargs: Any
 ) -> MobileNetV2:
     """MobileNetV2 architecture from the `MobileNetV2: Inverted Residuals and Linear
     Bottlenecks <https://arxiv.org/abs/1801.04381>`_ paper.
@@ -254,6 +257,20 @@ def mobilenet_v2(
 
     if weights is not None:
         _ovewrite_named_param(kwargs, "num_classes", len(weights.meta["categories"]))
+    
+    if cifar10:
+        inverted_residual_setting = [
+                # t, c, n, s
+                [1, 16, 1, 1],
+                # [6, 24, 2, 1],  # NOTE: change stride 2 -> 1 for CIFAR10
+                [4, 32, 3, 2],
+                [4, 64, 4, 2],
+                # [6, 96, 3, 1],
+                [4, 128, 3, 2],
+                # [6, 320, 1, 1],
+            ]
+        kwargs["num_classes"]=10
+        kwargs['inverted_residual_setting']=inverted_residual_setting
 
     model = MobileNetV2(**kwargs)
 
@@ -302,10 +319,22 @@ class QuantizableMobileNetV2(MobileNetV2):
         self.quant = torch.quantization.QuantStub()
         self.dequant = torch.quantization.DeQuantStub()
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: Tensor, check:bool=False) -> Tensor:
+        if check:
+            print(f"Before quant {x.shape}")
+            print(x,end='\n\n')
         x = self.quant(x)
+        if check:
+            print("After quant")
+            print(x,end='\n\n')
         x = self._forward_impl(x)
+        if check:
+            print("Before dequant")
+            print(x,end='\n\n')
         x = self.dequant(x)
+        if check:
+            print("After dequant")
+            print(x,end='\n\n')
         return x
 
     def fuse_model(self, is_qat: Optional[bool] = None) -> None:
@@ -419,13 +448,14 @@ def quat_mobilenet_v2(
     return model
 
 def _replace_relu(module: nn.Module) -> None:
+    from .layers import Quant_ReLU
     reassign = {}
     for name, mod in module.named_children():
         _replace_relu(mod)
         # Checking for explicit type instead of instance
         # as we only want to replace modules of the exact type
         # not inherited classes
-        if type(mod) is nn.ReLU or type(mod) is nn.ReLU6:
+        if type(mod) is nn.ReLU or type(mod) is nn.ReLU6 or type(mod) is Quant_ReLU:
             reassign[name] = nn.ReLU(inplace=False)
 
     for key, value in reassign.items():
