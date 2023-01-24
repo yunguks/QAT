@@ -19,11 +19,13 @@ def Cifar10_Dataloader(quantize=False,only_dataset=False, batch_size:int=128):
         train_transform = transforms.Compose([
             transforms.RandomCrop(32, padding = 4),
             transforms.RandomHorizontalFlip(0.5),
+            transforms.ToTensor(),
             input_quant(),
         ])
 
         test_transform = transforms.Compose([
             transforms.Resize((32,32)),
+            transforms.ToTensor(),
             input_quant(),
         ])
     else:
@@ -120,7 +122,6 @@ class input_quant(object):
     """
     
     def __call__(self,data):
-        img = torch.from_numpy(np.array(data))
-        img = img.permute((2,0,1)).contiguous().to(dtype=torch.float32)
-        # img /= 1000
-        return img
+        data = torch.round(data*254-127,decimals=0)
+        data = data/1000
+        return data

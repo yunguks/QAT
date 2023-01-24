@@ -14,7 +14,7 @@ from torchvision._utils import StrEnum
 from typing import Any, List, Optional, Union
 import warnings
 
-__all__ = ["MobileNetV2", "MobileNet_V2_Weights", "mobilenet_v2","QuantizableMobileNetV2","quat_mobilenet_v2"]
+__all__ = ["MobileNetV2", "MobileNet_V2_Weights", "mobilenet_v2","QuantizableMobileNetV2","quat_mobilenet_v2","quantize_model","QuantizableInvertedResidual"]
 
 # necessary for backwards compatibility
 class InvertedResidual(nn.Module):
@@ -319,22 +319,10 @@ class QuantizableMobileNetV2(MobileNetV2):
         self.quant = torch.quantization.QuantStub()
         self.dequant = torch.quantization.DeQuantStub()
 
-    def forward(self, x: Tensor, check:bool=False) -> Tensor:
-        if check:
-            print(f"Before quant {x.shape}")
-            print(x,end='\n\n')
+    def forward(self, x: Tensor) -> Tensor:
         x = self.quant(x)
-        if check:
-            print("After quant")
-            print(x,end='\n\n')
         x = self._forward_impl(x)
-        if check:
-            print("Before dequant")
-            print(x,end='\n\n')
         x = self.dequant(x)
-        if check:
-            print("After dequant")
-            print(x,end='\n\n')
         return x
 
     def fuse_model(self, is_qat: Optional[bool] = None) -> None:
@@ -437,8 +425,8 @@ def quat_mobilenet_v2(
 
     model = QuantizableMobileNetV2(block=QuantizableInvertedResidual, **kwargs)
     
-    _replace_relu(model)
     if quantize:
+        replace_relu(model)
         quantize_model(model, backend)
 
     if weights is not None:
@@ -447,11 +435,11 @@ def quat_mobilenet_v2(
     
     return model
 
-def _replace_relu(module: nn.Module) -> None:
+def replace_relu(module: nn.Module) -> None:
     from .layers import Quant_ReLU
     reassign = {}
     for name, mod in module.named_children():
-        _replace_relu(mod)
+        replace_relu(mod)
         # Checking for explicit type instead of instance
         # as we only want to replace modules of the exact type
         # not inherited classes
@@ -460,13 +448,39 @@ def _replace_relu(module: nn.Module) -> None:
 
     for key, value in reassign.items():
         module._modules[key] = value
+        
+def replace_Qrelu(module: nn.Module) -> None:
+    from .layers import Quant_ReLU
+    reassign = {}
+    for name, mod in module.named_children():
+        replace_Qrelu(mod)
+        # Checking for explicit type instead of instance
+        # as we only want to replace modules of the exact type
+        # not inherited classes
+        if type(mod) is nn.ReLU or type(mod) is nn.ReLU6:
+            reassign[name] = Quant_ReLU(inplace=False)
 
-def quantize_model(model: nn.Module, backend: str) -> None:
-    _dummy_input_data = torch.rand(1, 3, 299, 299)
+    for key, value in reassign.items():
+        module._modules[key] = value
+
+def quantize_model(model: nn.Module,data, backend: str = "fbgemm") -> None:
+    """_summary_
+
+    Args:
+        model (nn.Module): 
+        data (data): calibrate
+        backend (str, optional):  Defaults to "fbgemm".
+
+    Raises:
+        RuntimeError: _description_
+    """
     if backend not in torch.backends.quantized.supported_engines:
         raise RuntimeError("Quantized backend not supported ")
     torch.backends.quantized.engine = backend
+    replace_relu(model)
     model.eval()
+    model.fuse_model()  # type: ignore[operator]
+    
     # Make sure that weight qconfig matches that of the serialized models
     if backend == "fbgemm":
         model.qconfig = torch.ao.quantization.QConfig(  # type: ignore[assignment]
@@ -477,9 +491,12 @@ def quantize_model(model: nn.Module, backend: str) -> None:
         model.qconfig = torch.ao.quantization.QConfig(  # type: ignore[assignment]
             activation=torch.ao.quantization.default_observer, weight=torch.ao.quantization.default_weight_observer
         )
-
+    print(f"Q config = {model.qconfig}")
     # TODO https://github.com/pytorch/vision/pull/4232#pullrequestreview-730461659
-    model.fuse_model()  # type: ignore[operator]
     torch.ao.quantization.prepare(model, inplace=True)
-    model(_dummy_input_data)
+    
+    from tqdm import tqdm
+    print("calibrating...")
+    for input,label in tqdm(iter(data),leave=False):
+        _= model(input)
     torch.ao.quantization.convert(model, inplace=True)

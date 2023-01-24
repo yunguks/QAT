@@ -22,7 +22,63 @@ def Training(model, train_loader, test_loader, device, optimizer, scheduler, epo
     Returns:
         model
     """
-    
+    criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
+    print("Before Training")
+    torch.cuda.memory_reserved()
+    memory_check()
+    count = 0
+    best_loss = np.Inf
+    # Training
+    model.to(device)
+    for epoch in range(epochs):
+
+        running_loss = 0
+        running_corrects = 0
+        model.train()
+
+        for inputs, labels in tqdm(iter(train_loader),leave=False):
+
+            inputs = inputs.to(device)
+            labels = labels.to(device)
+
+            # zero the parameter gradients
+            optimizer.zero_grad()
+
+            # forward + backward + optimize
+            outputs = model(inputs)
+
+            loss = criterion(outputs, labels)
+ 
+            loss.backward()
+            optimizer.step()
+            
+            _, preds = torch.max(outputs, 1)
+            # statistics
+            running_loss += loss.item() * labels.size(0)
+            running_corrects += (preds == labels).sum().item()
+
+        # Set learning rate scheduler
+        if scheduler is not None:
+            scheduler.step()
+        train_loss = running_loss / len(train_loader.dataset)
+        train_accuracy = 100 * running_corrects / len(train_loader.dataset) 
+
+        # Evaluation
+        val_loss, val_acc = Evaluating(model,test_loader,device=device,criterion=criterion)
+        print(f"--------{epoch+1}----------")
+        print(f"Train {train_loss:.4f} Loss, {train_accuracy:.2f} Acc")
+        print(f"Validation {val_loss:.4f} Loss, {val_acc:.2f} Acc")
+
+        if best_loss > val_loss:
+            best_loss = val_loss
+            count = 0
+            torch.save(model.state_dict(), f"./models/{model_name}.pt")
+        else:
+            count +=1
+            if count > 10:
+                break
+    model.load_state_dict(torch.load(f"./models/{model_name}.pt")) 
+    return model
 
 def Evaluating(model, test_loader, device, criterion=None):
     """_summary_
@@ -63,71 +119,42 @@ def Evaluating(model, test_loader, device, criterion=None):
 
     return eval_loss, eval_accuracy
 
-def custom_quant_weights(model,device="cpu"):
+def custom_quant_weights(model:torch.nn.Module):
     """_summary_
     Quantize model weights [-0.127,0.127]
     Args:
         model (required): 
-        inplace (bool, optional): . Defaults to True. If not, return new_model 
 
     Returns:
         model, [M,n] list
     """
-    model.to("cpu")
-    model.eval()
-    with torch.no_grad():
-        state = model.state_dict()
-        backup = []
-    
-        total_tensor = torch.tensor([])
-        for i in state.keys():
-            new_param = state[i].view(-1)
-            total_tensor = torch.cat((total_tensor,new_param),0)
 
-        total_tensor,_ = total_tensor.sort()
-        number = int(len(total_tensor)*0.05)
-        
-        M = total_tensor[-number]
-        m = total_tensor[number]
-        backup.append([M,m])
-        for i in state.keys():
-            param = state[i]
-            new_param = param.clamp(m,M)
-            new_param = torch.round(254*(new_param-m)/(M-m)-127)
-            new_param = new_param/1000
-            # param.data = torch.quantize_per_tensor(new_param, 0.1, 10, torch.quint8)
-            state[i] = new_param
-        
-        model.load_state_dict(state)
-        model.to(device)
-        model.train()
+    backup = []
+    for name, param in model.named_parameters():
+        M = torch.max(param.data)
+        m = torch.min(param.data)
+        backup.append([m,M])
+        # param.data = param.data.clamp(m,M)
+        param.data = torch.round(254*(param.data-m)/(M-m)-127)/1000
+
     return model,backup
 
-def custom_dequant_weights(model,backup,device="cpu"):
+def custom_dequant_weights(model:torch.nn.Module,backup):
     """_summary_
     Quantize model weights [-0.127,0.127]
     Args:
         model (required): 
         backup (list) : quant M,n list
-        inplace (bool, optional): . Defaults to True. If not, return new_model 
 
     Returns:
         model 
     """
-    with torch.no_grad():
-        state = model.state_dict()
+    for i, params in enumerate(model.named_parameters()):
+        name, param = params
+        M = backup[i][1]
+        m = backup[i][0]
+        param.data = (1000*param.data+127)*(M-m)/254+m
 
-        max=backup[0][0]
-        min=backup[0][1]
-        for i,k in enumerate(state.keys()):
-            new_param = state[k]
-            new_param = (1000*new_param+127)*(max-min)/254+min
-            # param.data = torch.quantize_per_tensor(new_param, 0.1, 10, torch.quint8)
-            state[k] = new_param
-        
-        model.load_state_dict(state)
-        model.to(device)
-        model.train()
     return model
 
     

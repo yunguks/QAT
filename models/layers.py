@@ -153,18 +153,17 @@ class Quant_ReLU(Module):
     def __init__(self, inplace: bool = False):
         super(Quant_ReLU, self).__init__()
         self.inplace = inplace
+        self.relu = torch.nn.ReLU()
 
     def forward(self, input: Tensor) -> Tensor:
-        temp = input.clone()
-
-        for i in range(temp.size(0)):
+        input = self.relu(input)
+        for i in range(input.size(0)):
             with torch.no_grad():
-                t = temp[i].view(-1)
-                M = torch.max(t)
-                m = torch.min(t)
+                M = torch.max(input[i])
+                m = torch.min(input[i])
             input[i] = torch.round(254*(input[i]-m)/(M-m)-127) /1000 
         
-        return F.relu(input, inplace=self.inplace)
+        return input
 
     def extra_repr(self) -> str:
         inplace_str = 'inplace=True' if self.inplace else ''
