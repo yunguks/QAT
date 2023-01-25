@@ -131,8 +131,9 @@ def custom_quant_weights(model:torch.nn.Module):
 
     backup = []
     for name, param in model.named_parameters():
-        M = torch.max(param.data)
-        m = torch.min(param.data)
+        temp = param.data.clone()
+        M = torch.max(temp)
+        m = torch.min(temp)
         backup.append([m,M])
         # param.data = param.data.clamp(m,M)
         param.data = torch.round(254*(param.data-m)/(M-m)-127)/1000

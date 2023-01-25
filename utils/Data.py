@@ -122,6 +122,5 @@ class input_quant(object):
     """
     
     def __call__(self,data):
-        data = torch.round(data*254-127,decimals=0)
         data = data/1000
         return data

@@ -154,6 +154,17 @@ class MobileNetV2(nn.Module):
         )
 
         # weight initialization
+        # for m in self.modules():
+        #     if isinstance(m, nn.Conv2d):
+        #         nn.init.kaiming_normal_(m.weight, mode="fan_out")
+        #         if m.bias is not None:
+        #             nn.init.kaiming_normal_(m.bias)
+        #     elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
+        #         nn.init.kaiming_normal_(m.weight)
+        #         nn.init.kaiming_normal_(m.bias)
+        #     elif isinstance(m, nn.Linear):
+        #         nn.init.kaiming_normal_(m.weight, 0, 0.01)
+        #         nn.init.kaiming_normal_(m.bias)
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight, mode="fan_out")
@@ -463,13 +474,14 @@ def replace_Qrelu(module: nn.Module) -> None:
     for key, value in reassign.items():
         module._modules[key] = value
 
-def quantize_model(model: nn.Module,data, backend: str = "fbgemm") -> None:
+def quantize_model(model: nn.Module,data, backend: str = "fbgemm", qconfig = None) -> None:
     """_summary_
 
     Args:
         model (nn.Module): 
         data (data): calibrate
         backend (str, optional):  Defaults to "fbgemm".
+        qconfig ( ): Defaults to None
 
     Raises:
         RuntimeError: _description_
@@ -482,15 +494,18 @@ def quantize_model(model: nn.Module,data, backend: str = "fbgemm") -> None:
     model.fuse_model()  # type: ignore[operator]
     
     # Make sure that weight qconfig matches that of the serialized models
-    if backend == "fbgemm":
-        model.qconfig = torch.ao.quantization.QConfig(  # type: ignore[assignment]
-            activation=torch.ao.quantization.default_observer,
-            weight=torch.ao.quantization.default_per_channel_weight_observer,
-        )
-    elif backend == "qnnpack":
-        model.qconfig = torch.ao.quantization.QConfig(  # type: ignore[assignment]
-            activation=torch.ao.quantization.default_observer, weight=torch.ao.quantization.default_weight_observer
-        )
+    if qconfig is None:
+        if backend == "fbgemm":
+            model.qconfig = torch.ao.quantization.QConfig(  # type: ignore[assignment]
+                activation=torch.ao.quantization.default_observer,
+                weight=torch.ao.quantization.default_per_channel_weight_observer,
+            )
+        elif backend == "qnnpack":
+            model.qconfig = torch.ao.quantization.QConfig(  # type: ignore[assignment]
+                activation=torch.ao.quantization.default_observer, weight=torch.ao.quantization.default_weight_observer
+            )
+    else:
+        model.qconfig = qconfig
     print(f"Q config = {model.qconfig}")
     # TODO https://github.com/pytorch/vision/pull/4232#pullrequestreview-730461659
     torch.ao.quantization.prepare(model, inplace=True)
