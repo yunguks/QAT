@@ -4,7 +4,7 @@ from typing import Any, Callable, List, Optional, Dict, TypeVar, Mapping, Tuple
 import torch
 from torch import nn, Tensor
 
-from .layers import Conv2dNormActivation
+from .layers import Conv2dNormActivation, Quant_ReLU, Quant_ReLU6
 from torchvision.transforms._presets import ImageClassification
 from torchvision.utils import _log_api_usage_once
 from torchvision.models._api import Weights, WeightsEnum
@@ -153,18 +153,6 @@ class MobileNetV2(nn.Module):
             nn.Linear(self.last_channel, num_classes),
         )
 
-        # weight initialization
-        # for m in self.modules():
-        #     if isinstance(m, nn.Conv2d):
-        #         nn.init.kaiming_normal_(m.weight, mode="fan_out")
-        #         if m.bias is not None:
-        #             nn.init.kaiming_normal_(m.bias)
-        #     elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
-        #         nn.init.kaiming_normal_(m.weight)
-        #         nn.init.kaiming_normal_(m.bias)
-        #     elif isinstance(m, nn.Linear):
-        #         nn.init.kaiming_normal_(m.weight, 0, 0.01)
-        #         nn.init.kaiming_normal_(m.bias)
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight, mode="fan_out")
@@ -447,21 +435,19 @@ def quat_mobilenet_v2(
     return model
 
 def replace_relu(module: nn.Module) -> None:
-    from .layers import Quant_ReLU
     reassign = {}
     for name, mod in module.named_children():
         replace_relu(mod)
         # Checking for explicit type instead of instance
         # as we only want to replace modules of the exact type
         # not inherited classes
-        if type(mod) is nn.ReLU or type(mod) is nn.ReLU6 or type(mod) is Quant_ReLU:
+        if type(mod) is nn.ReLU or type(mod) is nn.ReLU6 or type(mod) is Quant_ReLU or type(mod) is Quant_ReLU6:
             reassign[name] = nn.ReLU(inplace=False)
 
     for key, value in reassign.items():
         module._modules[key] = value
         
 def replace_Qrelu(module: nn.Module) -> None:
-    from .layers import Quant_ReLU
     reassign = {}
     for name, mod in module.named_children():
         replace_Qrelu(mod)

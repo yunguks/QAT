@@ -9,7 +9,7 @@ from torch.nn import functional as F
 from torch.nn.modules import Module
 import copy
 
-__all__ = ["ConvNormActivation","Conv2dNormActivation","Quant_ReLU"]
+__all__ = ["ConvNormActivation","Conv2dNormActivation","Quant_ReLU","Quant_ReLU6"]
 
 def _make_ntuple(x: Any, n: int) -> Tuple[Any, ...]:
     """
@@ -138,14 +138,6 @@ class Quant_ReLU(Module):
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
         - Output: :math:`(*)`, same shape as the input.
     .. image:: ../scripts/activation_images/ReLU.png
-    Examples::
-        >>> m = nn.ReLU()
-        >>> input = torch.randn(2)
-        >>> output = m(input)
-      An implementation of CReLU - https://arxiv.org/abs/1603.05201
-        >>> m = nn.ReLU()
-        >>> input = torch.randn(2).unsqueeze(0)
-        >>> output = torch.cat((m(input), m(-input)))
     """
     __constants__ = ['inplace']
     inplace: bool
@@ -156,15 +148,93 @@ class Quant_ReLU(Module):
         self.relu = torch.nn.ReLU()
 
     def forward(self, input: Tensor) -> Tensor:
-        input = self.relu(input)
-        for i in range(input.size(0)):
-            with torch.no_grad():
-                M = torch.max(input[i])
-                m = torch.min(input[i])
+
+        temp = input.clone()
+        check = []
+        for i in range(temp.size(0)):
+            M = torch.max(temp[i])
+            m = torch.min(temp[i])
+            check.append([m,M])
             input[i] = torch.round(254*(input[i]-m)/(M-m)-127) /1000 
         
-        return input
+        for i in range(temp.size(0)):
+            m = check[i][0]
+            M = check[i][1]
+            input[i] = (1000*input[i]+127)*(M-m)/254+m
+        
+        return self.relu(input, inplace=self.inplace)
 
     def extra_repr(self) -> str:
         inplace_str = 'inplace=True' if self.inplace else ''
         return inplace_str
+        
+# class Quant_ReLU6(torch.nn.Module.activation.ReLU6):
+class Quant_ReLU6(Module):
+    r"""my Quant_ReLU6 Module.
+    HardTanh is defined as:
+    .. math::
+        \text{HardTanh}(x) = \begin{cases}
+            \text{max\_val} & \text{ if } x > \text{ max\_val } \\
+            \text{min\_val} & \text{ if } x < \text{ min\_val } \\
+            x & \text{ otherwise } \\
+        \end{cases}
+    Args:
+        min_val: minimum value of the linear region range. Default: -1
+        max_val: maximum value of the linear region range. Default: 1
+        inplace: can optionally do the operation in-place. Default: ``False``
+    Keyword arguments :attr:`min_value` and :attr:`max_value`
+    have been deprecated in favor of :attr:`min_val` and :attr:`max_val`.
+    Shape:
+        - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
+        - Output: :math:`(*)`, same shape as the input.
+    .. image:: ../scripts/activation_images/Hardtanh.png
+    Examples::
+        >>> m = nn.Hardtanh(-2, 2)
+        >>> input = torch.randn(2)
+        >>> output = m(input)
+    """
+    __constants__ = ['min_val', 'max_val', 'inplace']
+
+    min_val: float
+    max_val: float
+    inplace: bool
+
+    def __init__(
+        self,
+        min_val: float = 0.,   # hardtanh -1.
+        max_val: float = 6.,    # hardtanh 1.
+        inplace: bool = False,
+        min_value: Optional[float] = None,
+        max_value: Optional[float] = None
+    ) -> None:
+        super(Quant_ReLU6, self).__init__()
+        if min_value is not None:
+            warnings.warn("keyword argument min_value is deprecated and rename to min_val")
+            min_val = min_value
+        if max_value is not None:
+            warnings.warn("keyword argument max_value is deprecated and rename to max_val")
+            max_val = max_value
+
+        self.min_val = min_val
+        self.max_val = max_val
+        self.inplace = inplace
+        assert self.max_val > self.min_val
+
+    def forward(self, input: Tensor) -> Tensor:
+        
+        temp = input.clone()
+
+        M = torch.max(torch.max(temp),torch.full_like(temp,0.127))
+        m = torch.min(torch.min(temp),torch.full_like(temp,-0.127))
+        input = torch.round(254*(input-m)/(M-m)-127) /1000 
+
+        input = (1000*input+127)*(M-m)/254+m
+            
+        return F.hardtanh(input, self.min_val, self.max_val, self.inplace)
+
+    def extra_repr(self) -> str:
+        inplace_str = ', inplace=True' if self.inplace else ''
+        return 'min_val={}, max_val={}{}'.format(
+            self.min_val, self.max_val, inplace_str
+        )
+        

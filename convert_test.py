@@ -1,8 +1,7 @@
 from models import quat_mobilenet_v2, MobileNet_V2_Weights, quantize_model
 from models import Quant_ReLU
-from torchsummary import summary
 from utils import Data
-from utils.Train import Training, Evaluating
+from utils.Train import Evaluating
 import torch
 import argparse
 import os
@@ -12,9 +11,10 @@ import copy
 def get_args():
     parser = argparse.ArgumentParser(description="QAT training test")
     parser.add_argument("--model",type=str,default="mobilenet", help="select model. Default mobilenet")
-    parser.add_argument("--lr", type=float, default= 1e-2,help="initial learning rate. Default 1e-2")
     parser.add_argument("--random", type=int,default=42, help="select random seed. Default 42") 
-    parser.add_argument("--tiny", type=bool, default=False, help="select tiny model. Default False")
+    parser.add_argument("--weights", type=str, help="load weights file name")
+    parser.add_argument("--tiny",action="store_true", help="select tiny model. Default False")
+    parser.add_argument("--only",action="store_true", help="test only one post quant")
     return vars(parser.parse_args())
 
 if __name__=="__main__":
@@ -30,23 +30,18 @@ if __name__=="__main__":
     # model load
     if kargs["tiny"]:
         NEW_MODEL = quat_mobilenet_v2(cifar10=True)
-        NEW_MODEL.load_state_dict(torch.load("./models/tiny_mobilenetv2_cifar.pt"))
+        NEW_MODEL.load_state_dict(torch.load("./models/weights/tiny_mobilenetv2_cifar.pt"))
     else:
         NEW_MODEL = quat_mobilenet_v2(weights=MobileNet_V2_Weights.IMAGENET1K_V1,activation_layer=torch.nn.ReLU)
         NEW_MODEL.classifier.append(torch.nn.Dropout(0.2))
         NEW_MODEL.classifier.append(torch.nn.Linear(1000, 10))
-        NEW_MODEL.load_state_dict(torch.load("./models/mobilenetv2_cifar10.pt"))
+        NEW_MODEL.load_state_dict(torch.load("./models/weights/q_mobilenetv2_cifar10.pt"))
     # data load
+    if kargs["weights"]:
+        NEW_MODEL.load_state_dict(torch.load(kargs["weights"]))
+        
     train_loader, test_loader = Data.Cifar10_Dataloader()
     
-    # optimizer 
-    # optimizer = torch.optim.SGD(NEW_MODEL.parameters(),lr=1e-5,momentum=0.9)
-    
-    # # scheduler 
-    # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[20,60,90], gamma=0.5)
-     
-    # # train model
-    # NEW_MODEL = Train.Training(NEW_MODEL,train_dataloader,test_loader,gpu_device,optimizer,scheduler)
     NEW_MODEL.to(cpu_device)
     NEW_MODEL.eval()
     _, val_acc = Evaluating(NEW_MODEL, test_loader,device=cpu_device)
@@ -55,12 +50,18 @@ if __name__=="__main__":
     order = {}
     if kargs["tiny"]:
         order["Post"] = "tiny_mobilenetv2_cifar.pt"
+    
+    elif kargs["only"]:
+        order["Post"] = os.path.basename(kargs["weights"])
+    
     else:
-        order["Post"] = "mobilenetv2_cifar10.pt"
+        order["Post"] = "q_mobilenetv2_cifar10.pt"
         order["QAT"] = "QAT_mobilenetv2_cifar10.pt"
         order["Input QAT"] = "input_q_mobilenetv2_cifar10.pt"
         order["Weight QAT"] = "weight_q_mobilenetv2_cifar10.pt"
         order["Input-weight QAT"] = "input_weight_q_mobilenetv2_cifar10.pt"
+       
+    
     qconfig = []
     qconfig.append(torch.quantization.get_default_qconfig("fbgemm"))
     n = torch.ao.quantization.QConfig(  # type: ignore[assignment]
@@ -83,9 +84,9 @@ if __name__=="__main__":
         for key in order.keys():
             new_model = copy.deepcopy(NEW_MODEL)
             print(f"----------------- {key} quantization -----------------")
-            model_name = "./models/"+order[key]
+            model_name = "./models/weights/"+order[key]
             if "QAT" == key:
-                jit_model = torch.jit.load("./models/Q_mobilenetv2_cifar10_jit.pt")
+                jit_model = torch.jit.load("./models/weights/Q_mobilenetv2_cifar10_jit.pt")
                 _,int8_acc = Evaluating(jit_model, test_loader,"cpu")
                 q = torch.quantization.get_default_qconfig("fbgemm")
                 print(f"{q} : {int8_acc:.2f}acc",end="\n\n")

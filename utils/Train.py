@@ -4,9 +4,9 @@ import numpy as np
 from .Check import memory_check
 import copy
 
-__all__ = ["Training", "Evaluating", "custom_quant_weights","custom_dequant_weights"]
+__all__ = ["Training", "Evaluating", "custom_quant_weights","custom_dequant_weights","fake_weight_quant"]
     
-def Training(model, train_loader, test_loader, device, optimizer, scheduler, epochs=100,model_name="test"):
+def Training(model, train_loader, test_loader, device, optimizer, scheduler, epochs=100,save_name=None,fake=False):
     """_summary_
 
     Args:
@@ -17,12 +17,13 @@ def Training(model, train_loader, test_loader, device, optimizer, scheduler, epo
         optimizer (require): Optimizer
         scheduler (require): Scheduler
         epochs (int, optional): . Defaults to 100.
-        model_name (str, optional): Best Loss model file name. Defaults to "test".
+        save_name (str, optional): Best Loss model file name. Defaults to "test".
+        fake (bool,optional) : fake weight quantization before forward. Dafualt False
 
     Returns:
         model
     """
-    criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
+    criterion = torch.nn.CrossEntropyLoss(label_smoothing=0.1)
     print("Before Training")
     torch.cuda.memory_reserved()
     memory_check()
@@ -45,6 +46,8 @@ def Training(model, train_loader, test_loader, device, optimizer, scheduler, epo
             optimizer.zero_grad()
 
             # forward + backward + optimize
+            if fake:
+                model = fake_weight_quant(model)
             outputs = model(inputs)
 
             loss = criterion(outputs, labels)
@@ -72,12 +75,14 @@ def Training(model, train_loader, test_loader, device, optimizer, scheduler, epo
         if best_loss > val_loss:
             best_loss = val_loss
             count = 0
-            torch.save(model.state_dict(), f"./models/{model_name}.pt")
+            if save_name is None:
+                save_name = "./models/weights/test.pt"
+            torch.save(model.state_dict(),save_name)
         else:
             count +=1
             if count > 10:
                 break
-    model.load_state_dict(torch.load(f"./models/{model_name}.pt")) 
+    model.load_state_dict(torch.load(save_name)) 
     return model
 
 def Evaluating(model, test_loader, device, criterion=None):
@@ -158,4 +163,19 @@ def custom_dequant_weights(model:torch.nn.Module,backup):
 
     return model
 
+def fake_weight_quant(model:torch.nn.Module,per_channel=False):
+    """_summary_
+    Args:
+        model (torch.nn.Module): model
+        per_channel (bool, optional): Defaults to False. IF True, using quant-dequant with per-channel
+    Returns:
+        model
+    """
+    if per_channel:
+        for i, params in enumerate(model.named_parameters()):
+            pass
+    else:
+        model, backup = custom_quant_weights(model)
+        model = custom_dequant_weights(model,backup)
     
+    return model
