@@ -186,7 +186,7 @@ def fake_weight_quant(model:torch.nn.Module,per_channel=True):
                 s = (Max-Min)/(max_val_cut-min_val_cut)
                 z = min_val_cut -torch.round(Min/s,decimals=3)
 
-                for i in range(len(y)):
+                for i in range(y.size()[0]):
                     y[i] = torch.round(y[i]/s[i]+z[i],decimals=3)
                     y[i] = (y[i]-z[i])*s[i]
                 param=y

@@ -46,7 +46,7 @@ if __name__=="__main__":
     NEW_MODEL.eval()
     if kargs["savename"]:
         if kargs["path"]:
-            csv_name = os.path.join(kargs["path"],"convert_result.csv")
+            csv_name = os.path.join(kargs["path"],kargs["savename"])
         else:
             csv_name = "./result/convert_result.csv"
         header = pd.DataFrame(columns=["filename",
@@ -70,7 +70,7 @@ if __name__=="__main__":
     elif kargs["path"]:
         filelist = os.listdir(kargs["path"])
         filelist_pt = [f for f in filelist if f.endswith(".pt")]
-        order["Post"] = filelist_pt
+        order["Post"] = [os.path.join(kargs["path"],name) for name in filelist_pt]
     else:
         order["Post"] = "./models/weights/q_mobilenetv2_cifar10.pt"
         order["QAT"] = "./models/weights/QAT_mobilenetv2_cifar10.pt"
@@ -103,11 +103,13 @@ if __name__=="__main__":
             for file in order[key]:
                 new_model = copy.deepcopy(NEW_MODEL)
                 model_name = file
-                if "QAT" == key:
-                    jit_model = torch.jit.load("./models/weights/Q_mobilenetv2_cifar10_jit.pt")
+                print(f"converting {model_name}....")
+                if "TorchQAT" in model_name:
+                    jit_model = torch.jit.load(model_name)
                     _,int8_acc = Evaluating(jit_model, test_loader,"cpu")
-                    q = torch.quantization.get_default_qconfig("fbgemm")
-                    print(f"{q} : {int8_acc:.2f}acc",end="\n\n")
+                    print(f"{int8_acc:.2f}acc",end="\n\n")
+                    data = pd.DataFrame([model_name,int8_acc])
+                    data.to_csv(csv_name, mode='a',header=False,index=False)
                 else:
                     new_model.load_state_dict(torch.load(model_name))
                     _, val_acc = Evaluating(new_model, test_loader,device=cpu_device)

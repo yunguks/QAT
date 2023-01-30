@@ -216,7 +216,7 @@ class Quant_ReLU6(Module):
 
     def forward(self, input: Tensor) -> Tensor:
         with torch.no_grad():
-            for i in range(len(input)):
+            for i in range(input.size()[0]):
                 M = torch.max(input[i])
                 m = torch.min(input[i])
                 input[i] = torch.round(254*(input[i]-m)/(M-m)-127)/1000

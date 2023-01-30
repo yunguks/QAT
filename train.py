@@ -98,6 +98,8 @@ if __name__=="__main__":
         save_name = kargs["savename"]
         if ".pt" not in kargs["savename"]:
             save_name +=".pt"
+        if kargs["torchQAT"]:
+            save_name.replace(".pt","_jit.pt")
     
     csv_name = save_name.replace(".pt",".csv")
     header = pd.DataFrame({"epoch":[],"train_loss":[],"train_acc":[],"val_loss":[],"val_acc":[]})
@@ -122,7 +124,7 @@ if __name__=="__main__":
             # input fake
             if kargs["input_fake"] or kargs["fake"]:
                 with torch.no_grad():
-                    for i in range(len(inputs)):
+                    for i in range(inputs.size()[0]):
                         temp = inputs[i].detach()
                         M = torch.max(temp)
                         m = torch.min(temp)
@@ -171,7 +173,15 @@ if __name__=="__main__":
         if best_loss > val_loss:
             best_loss = val_loss
             count = 0
-            torch.save(MODEL.state_dict(),save_name)
+            if kargs["torchQAT"]:
+                q_model = torch.ao.quantization.convert(MODEL)
+                q_model.eval()
+                _,int8_acc = Evaluating(q_model,train_loader,cpu_device)
+                torch.jit.save(torch.jit.script(q_model),save_name)
+            else:
+                torch.save(MODEL.state_dict(),save_name)
+            
+            
         else:
             count +=1
             if count > 10:
