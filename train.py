@@ -9,6 +9,7 @@ import os
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
+import copy
 
 def get_args():
     parser = argparse.ArgumentParser(description="QAT training test")
@@ -79,6 +80,26 @@ if __name__=="__main__":
         MODEL.qconfig = torch.quantization.get_default_qconfig("fbgemm")
         MODEL = torch.quantization.prepare_qat(MODEL)
     
+    # model weight save name and result
+    if kargs["savename"] is None:
+        save_name = "./result/test.pt"
+    else:
+        save_name = kargs["savename"]
+        if ".pt" not in kargs["savename"]:
+            save_name +=".pt"
+    if kargs["torchQAT"]:
+        save_name = save_name.replace(".pt","_jit.pt")
+    
+    if os.path.exists(save_name):
+        # qat_model = torch.jit.load(save_name)
+        # print(qat_model.state_dict())
+        MODEL.load_state_dict(torch.load(save_name))
+        
+    csv_name = save_name.replace(".pt",".csv")
+    if os.path.exists(csv_name) is False:
+        header = pd.DataFrame({"epoch":[],"train_loss":[],"train_acc":[],"val_loss":[],"val_acc":[]})
+        header.to_csv(csv_name,index=False)
+    
     # data load
     train_loader, test_loader = Data.Cifar10_Dataloader()
     
@@ -91,19 +112,6 @@ if __name__=="__main__":
     # # train model
     criterion = torch.nn.CrossEntropyLoss(label_smoothing=0.1)
 
-    # model weight save name and result
-    if kargs["savename"] is None:
-        save_name = "./result/test.pt"
-    else:
-        save_name = kargs["savename"]
-        if ".pt" not in kargs["savename"]:
-            save_name +=".pt"
-        if kargs["torchQAT"]:
-            save_name.replace(".pt","_jit.pt")
-    
-    csv_name = save_name.replace(".pt",".csv")
-    header = pd.DataFrame({"epoch":[],"train_loss":[],"train_acc":[],"val_loss":[],"val_acc":[]})
-    header.to_csv(csv_name,index=False)
 
     count = 0
     best_loss = np.Inf
@@ -174,13 +182,14 @@ if __name__=="__main__":
             best_loss = val_loss
             count = 0
             if kargs["torchQAT"]:
-                q_model = torch.ao.quantization.convert(MODEL)
+                q_model = copy.deepcopy(MODEL)
+                q_model.to(cpu_device)
                 q_model.eval()
+                q_model = torch.ao.quantization.convert(q_model)
                 _,int8_acc = Evaluating(q_model,train_loader,cpu_device)
-                torch.jit.save(torch.jit.script(q_model),save_name)
+                torch.jit.save(q_model,save_name)
             else:
                 torch.save(MODEL.state_dict(),save_name)
-            
             
         else:
             count +=1

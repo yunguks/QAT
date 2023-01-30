@@ -48,39 +48,45 @@ if __name__=="__main__":
         if kargs["path"]:
             csv_name = os.path.join(kargs["path"],kargs["savename"])
         else:
-            csv_name = "./result/convert_result.csv"
+            csv_name = kargs['savename']
         header = pd.DataFrame(columns=["filename",
                                        "origin_acc",
-                                       "act=hist,weight=channelMinMa",
-                                       "act=minmax,weight=channelMinMax",
-                                       "act=minmax,weight=minmax",
-                                       "act-minmax,weight=minmax127"])
-        header.to_csv(csv_name,index=False)
+                                       "act=hist,weight=channelMinMax",
+                                       "act=hist,weight=MinMax",
+                                       "act=MinMax,weight=channelMinMax",
+                                       "act=MinMax,weight=MinMax"])
+        if os.path.isfile(csv_name) is False:
+            header.to_csv(csv_name,index=False)
             
     order = {}
     if kargs["tiny"]:
         if kargs["weight"] is None:
-            order["Post"] = "./models/weights/tiny_mobilenetv2_cifar.pt"
+            order["Post"] = ["./models/weights/tiny_mobilenetv2_cifar.pt"]
         else:
-            order["Post"] = kargs["weight"]
+            order["Post"] = [kargs["weight"]]
         
     elif kargs["only"]:
-        order["Post"] = kargs["weight"]
+        order["Post"] = [kargs["weight"]]
     
     elif kargs["path"]:
         filelist = os.listdir(kargs["path"])
         filelist_pt = [f for f in filelist if f.endswith(".pt")]
         order["Post"] = [os.path.join(kargs["path"],name) for name in filelist_pt]
     else:
-        order["Post"] = "./models/weights/q_mobilenetv2_cifar10.pt"
-        order["QAT"] = "./models/weights/QAT_mobilenetv2_cifar10.pt"
-        order["Input QAT"] = "./models/weights/input_q_mobilenetv2_cifar10.pt"
-        order["Weight QAT"] = "./models/weights/weight_q_mobilenetv2_cifar10.pt"
-        order["Input-weight QAT"] = "./models/weights/input_weight_q_mobilenetv2_cifar10.pt"
+        order["Post"] = ["./models/weights/q_mobilenetv2_cifar10.pt"]
+        order["QAT"] = ["./models/weights/QAT_mobilenetv2_cifar10.pt"]
+        order["Input QAT"] = ["./models/weights/input_q_mobilenetv2_cifar10.pt"]
+        order["Weight QAT"] = ["./models/weights/weight_q_mobilenetv2_cifar10.pt"]
+        order["Input-weight QAT"] = ["./models/weights/input_weight_q_mobilenetv2_cifar10.pt"]
        
     
     qconfig = []
     qconfig.append(torch.quantization.get_default_qconfig("fbgemm"))
+    n = torch.ao.quantization.QConfig(  # type: ignore[assignment]
+                activation=torch.ao.quantization.default_histogram_observer,
+                weight=torch.ao.quantization.default_weight_observer
+            )
+    qconfig.append(n)
     n = torch.ao.quantization.QConfig(  # type: ignore[assignment]
                 activation=torch.ao.quantization.default_observer,
                 weight=torch.ao.quantization.default_per_channel_weight_observer
@@ -91,17 +97,11 @@ if __name__=="__main__":
             weight=torch.ao.quantization.default_weight_observer
             )
     qconfig.append(n)
-    n =torch.ao.quantization.QConfig(
-            activation=torch.ao.quantization.default_observer, 
-            weight=torch.ao.quantization.weight_observer_range_neg_127_to_127
-            )
-    qconfig.append(n)
     
     with torch.no_grad():
         for key in order.keys():
             print(f"----------------- {key} quantization -----------------")
             for file in order[key]:
-                new_model = copy.deepcopy(NEW_MODEL)
                 model_name = file
                 print(f"converting {model_name}....")
                 if "TorchQAT" in model_name:
@@ -111,18 +111,20 @@ if __name__=="__main__":
                     data = pd.DataFrame([model_name,int8_acc])
                     data.to_csv(csv_name, mode='a',header=False,index=False)
                 else:
-                    new_model.load_state_dict(torch.load(model_name))
-                    _, val_acc = Evaluating(new_model, test_loader,device=cpu_device)
+                    NEW_MODEL.load_state_dict(torch.load(model_name))
+                    _, val_acc = Evaluating(NEW_MODEL, test_loader,device=cpu_device)
                     print(f"Before Model acc : {val_acc:.2f}%")
-                    for _ in range(kargs["loop"]):
+                    
+                    for i in range(kargs["loop"]):
+                        print(f"loop {i+1}")
                         add = [model_name,val_acc]
                         for q in qconfig:
-                            default_q = copy.deepcopy(new_model)
+                            default_q = copy.deepcopy(NEW_MODEL)
                             quantize_model(default_q, data= train_loader,qconfig=q)
-                            default_q = torch.jit.script(default_q)
                             _,int8_acc = Evaluating(default_q,test_loader,"cpu")
                             print(f"--> {int8_acc:.2f}acc",end="\n\n")
                             add.append(f"{int8_acc:.2f}")
                         data = pd.DataFrame([add])
-                        data.to_csv(csv_name, mode='a',header=False,index=False)
+                        if kargs["savename"]:
+                            data.to_csv(csv_name, mode='a',header=False,index=False)
         
