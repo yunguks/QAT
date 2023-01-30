@@ -14,7 +14,10 @@ from torchvision._utils import StrEnum
 from typing import Any, List, Optional, Union
 import warnings
 
-__all__ = ["MobileNetV2", "MobileNet_V2_Weights", "mobilenet_v2","QuantizableMobileNetV2","quat_mobilenet_v2","quantize_model","QuantizableInvertedResidual"]
+__all__ = ["MobileNetV2", "MobileNet_V2_Weights", "mobilenet_v2",
+           "QuantizableMobileNetV2","quat_mobilenet_v2",
+           "quantize_model","QuantizableInvertedResidual",
+           "replace_relu", "replace_Qrelu"]
 
 # necessary for backwards compatibility
 class InvertedResidual(nn.Module):
@@ -455,7 +458,7 @@ def replace_Qrelu(module: nn.Module) -> None:
         # as we only want to replace modules of the exact type
         # not inherited classes
         if type(mod) is nn.ReLU or type(mod) is nn.ReLU6:
-            reassign[name] = Quant_ReLU(inplace=False)
+            reassign[name] = Quant_ReLU6(inplace=False)
 
     for key, value in reassign.items():
         module._modules[key] = value

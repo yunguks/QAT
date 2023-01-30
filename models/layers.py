@@ -149,17 +149,11 @@ class Quant_ReLU(Module):
 
     def forward(self, input: Tensor) -> Tensor:
 
-        temp = input.clone()
-        check = []
-        for i in range(temp.size(0)):
-            M = torch.max(temp[i])
-            m = torch.min(temp[i])
-            check.append([m,M])
-            input[i] = torch.round(254*(input[i]-m)/(M-m)-127) /1000 
-        
-        for i in range(temp.size(0)):
-            m = check[i][0]
-            M = check[i][1]
+        for i in range(len(input)):
+            temp = input[i].detach()
+            M = torch.max(temp)
+            m = torch.min(temp)
+            input[i] = torch.round(254*(input[i]-m)/(M-m)-127)/1000
             input[i] = (1000*input[i]+127)*(M-m)/254+m
         
         return self.relu(input, inplace=self.inplace)
@@ -221,14 +215,17 @@ class Quant_ReLU6(Module):
         assert self.max_val > self.min_val
 
     def forward(self, input: Tensor) -> Tensor:
-        
-        temp = input.clone()
+        with torch.no_grad():
+            for i in range(len(input)):
+                M = torch.max(input[i])
+                m = torch.min(input[i])
+                input[i] = torch.round(254*(input[i]-m)/(M-m)-127)/1000
+                input[i] = (1000*input[i]+127)*(M-m)/254+m
+        # M = torch.max(torch.max(input),torch.full_like(input,0.127))
+        # m = torch.min(torch.min(input),torch.full_like(input,-0.127))
+        # input = torch.round(254*(input-m)/(M-m)-127) /1000 
 
-        M = torch.max(torch.max(temp),torch.full_like(temp,0.127))
-        m = torch.min(torch.min(temp),torch.full_like(temp,-0.127))
-        input = torch.round(254*(input-m)/(M-m)-127) /1000 
-
-        input = (1000*input+127)*(M-m)/254+m
+        # input = (1000*input+127)*(M-m)/254+m
             
         return F.hardtanh(input, self.min_val, self.max_val, self.inplace)
 

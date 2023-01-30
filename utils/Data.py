@@ -4,7 +4,7 @@ import torchvision
 import torch
 import numpy as np
 
-def Cifar10_Dataloader(quantize=False,only_dataset=False, batch_size:int=128):
+def Cifar10_Dataloader(quantize=False,only_dataset=False, batch_size:int=128,filepath=None):
     """_summary_
 
     Args:
@@ -41,11 +41,13 @@ def Cifar10_Dataloader(quantize=False,only_dataset=False, batch_size:int=128):
             transforms.ToTensor(),
             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
         ])
-
-    train_dataset = torchvision.datasets.CIFAR10(root="data", train=True, download=True, transform=train_transform) 
+    if filepath is None:
+        filepath = "data"
+    
+    train_dataset = torchvision.datasets.CIFAR10(root=filepath, train=True, download=True, transform=train_transform) 
     # We will use test set for validation and test in this project.
     # Do not use test set for validation in practice!
-    test_dataset = torchvision.datasets.CIFAR10(root="data", train=False, download=True, transform=test_transform)
+    test_dataset = torchvision.datasets.CIFAR10(root=filepath, train=False, download=True, transform=test_transform)
     print(f"Train data set = {len(train_dataset)}, Test = {len(test_dataset)}")
     if only_dataset:
         return train_dataset, test_dataset

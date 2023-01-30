@@ -163,17 +163,35 @@ def custom_dequant_weights(model:torch.nn.Module,backup):
 
     return model
 
-def fake_weight_quant(model:torch.nn.Module,per_channel=False):
+def fake_weight_quant(model:torch.nn.Module,per_channel=True):
     """_summary_
     Args:
         model (torch.nn.Module): model
-        per_channel (bool, optional): Defaults to False. IF True, using quant-dequant with per-channel
+        per_channel (bool, optional): Defaults to True. IF True, using quant-dequant with per-channel
     Returns:
         model
     """
     if per_channel:
-        for i, params in enumerate(model.named_parameters()):
-            pass
+        min_val_cut = torch.tensor(-0.127)
+        max_val_cut = torch.tensor(0.127)
+        
+        for name, param in model.named_parameters():
+            if param.dim()==4:
+                y = param.detach()
+
+                Min,Max = torch.aminmax(y, dim=1)
+                Min = torch.min(Min,min_val_cut)
+                Max = torch.max(Max,max_val_cut)
+
+                s = (Max-Min)/(max_val_cut-min_val_cut)
+                z = min_val_cut -torch.round(Min/s,decimals=3)
+
+                for i in range(len(y)):
+                    y[i] = torch.round(y[i]/s[i]+z[i],decimals=3)
+                    y[i] = (y[i]-z[i])*s[i]
+                param=y
+                del y,s,z
+
     else:
         model, backup = custom_quant_weights(model)
         model = custom_dequant_weights(model,backup)
