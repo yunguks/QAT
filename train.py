@@ -87,8 +87,6 @@ if __name__=="__main__":
         save_name = kargs["savename"]
         if ".pt" not in kargs["savename"]:
             save_name +=".pt"
-    if kargs["torchQAT"]:
-        save_name = save_name.replace(".pt","_jit.pt")
     
     if os.path.exists(save_name):
         # qat_model = torch.jit.load(save_name)
@@ -171,25 +169,17 @@ if __name__=="__main__":
         print(f"Validation {val_loss:.4f} Loss, {val_acc:.2f} Acc")
 
         data = pd.DataFrame({"epoch":[epoch+1],
-                             "train_loss":[train_loss],
-                             "train_acc":[train_accuracy],
-                             "val_loss":[val_loss],
-                             "val_acc":[val_acc]
+                             "train_loss":[round(train_loss,4)],
+                             "train_acc":[round(train_accuracy,2)],
+                             "val_loss":[round(val_loss,4)],
+                             "val_acc":[round(val_acc,2)]
         })
         data.to_csv(csv_name, mode='a',header=False,index=False)
         
         if best_loss > val_loss:
             best_loss = val_loss
             count = 0
-            if kargs["torchQAT"]:
-                q_model = copy.deepcopy(MODEL)
-                q_model.to(cpu_device)
-                q_model.eval()
-                q_model = torch.ao.quantization.convert(q_model)
-                _,int8_acc = Evaluating(q_model,train_loader,cpu_device)
-                torch.jit.save(q_model,save_name)
-            else:
-                torch.save(MODEL.state_dict(),save_name)
+            torch.save(MODEL.state_dict(),save_name)
             
         else:
             count +=1

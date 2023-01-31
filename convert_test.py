@@ -1,6 +1,6 @@
 from models import quat_mobilenet_v2, MobileNet_V2_Weights, quantize_model
 from models import Quant_ReLU
-from utils import Data
+from utils import Data,set_random_seeds
 from utils.Train import Evaluating
 import torch
 import argparse
@@ -11,7 +11,7 @@ import copy
 def get_args():
     parser = argparse.ArgumentParser(description="QAT training test")
     parser.add_argument("--model",type=str,default="mobilenet", help="select model. Default mobilenet")
-    parser.add_argument("--random", type=int,default=42, help="select random seed. Default 42") 
+    parser.add_argument("--seed", type=int,default=42, help="select random seed. Default 42") 
     parser.add_argument("--weight", type=str, help="load weights file name")
     parser.add_argument("--tiny",action="store_true", help="select tiny model. Default False")
     parser.add_argument("--only",action="store_true", help="test only one post quant")
@@ -23,7 +23,7 @@ def get_args():
 if __name__=="__main__":
     kargs = get_args()
     print(kargs)
-  
+    set_random_seeds(kargs["seed"])
     # device 
     if torch.cuda.is_available():
         gpu_device = torch.device("cuda")
@@ -64,14 +64,15 @@ if __name__=="__main__":
             order["Post"] = ["./models/weights/tiny_mobilenetv2_cifar.pt"]
         else:
             order["Post"] = [kargs["weight"]]
-        
-    elif kargs["only"]:
-        order["Post"] = [kargs["weight"]]
     
-    elif kargs["path"]:
+    if kargs["path"]:
         filelist = os.listdir(kargs["path"])
         filelist_pt = [f for f in filelist if f.endswith(".pt")]
         order["Post"] = [os.path.join(kargs["path"],name) for name in filelist_pt]
+        
+    elif kargs["weight"]:
+        order["Post"] = [kargs["weight"]]
+    
     else:
         order["Post"] = ["./models/weights/q_mobilenetv2_cifar10.pt"]
         order["QAT"] = ["./models/weights/QAT_mobilenetv2_cifar10.pt"]
@@ -105,8 +106,13 @@ if __name__=="__main__":
                 model_name = file
                 print(f"converting {model_name}....")
                 if "TorchQAT" in model_name:
-                    jit_model = torch.jit.load(model_name)
-                    _,int8_acc = Evaluating(jit_model, test_loader,"cpu")
+                    QAT = copy.deepcopy(NEW_MODEL)
+                    QAT.fuse_model()
+                    QAT.qconfig = torch.quantization.get_default_qconfig("fbgemm")
+                    QAT = torch.quantization.prepare_qat(QAT)
+                    QAT.load_state_dict(torch.load(model_name))
+                    QAT = torch.ao.quantization.convert(QAT)
+                    _,int8_acc = Evaluating(QAT, test_loader,"cpu")
                     print(f"{int8_acc:.2f}acc",end="\n\n")
                     data = pd.DataFrame([model_name,int8_acc])
                     data.to_csv(csv_name, mode='a',header=False,index=False)
@@ -117,7 +123,7 @@ if __name__=="__main__":
                     
                     for i in range(kargs["loop"]):
                         print(f"loop {i+1}")
-                        add = [model_name,val_acc]
+                        add = [os.path.basename(model_name),val_acc]
                         for q in qconfig:
                             default_q = copy.deepcopy(NEW_MODEL)
                             quantize_model(default_q, data= train_loader,qconfig=q)
