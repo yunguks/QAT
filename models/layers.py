@@ -215,12 +215,11 @@ class Quant_ReLU6(Module):
         assert self.max_val > self.min_val
 
     def forward(self, input: Tensor) -> Tensor:
-        with torch.no_grad():
-            for i in range(input.size()[0]):
-                M = torch.max(input[i])
-                m = torch.min(input[i])
-                input[i] = torch.round(254*(input[i]-m)/(M-m)-127)/1000
-                input[i] = (1000*input[i]+127)*(M-m)/254+m
+        for i in range(input.size()[0]):
+            M = torch.max(input[i])
+            m = torch.min(input[i])
+            input[i] = torch.round(254*(input[i]-m)/(M-m)-127)/1000
+            input[i] = (1000*input[i]+127)*(M-m)/254+m
         # M = torch.max(torch.max(input),torch.full_like(input,0.127))
         # m = torch.min(torch.min(input),torch.full_like(input,-0.127))
         # input = torch.round(254*(input-m)/(M-m)-127) /1000 
