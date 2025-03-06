@@ -1,4 +1,3 @@
-# ~~Quantization Aware Training~~   
 # Fake quantiation
 Model : mobilenetv2    
 Data : Cifar10    
